@@ -150,16 +150,15 @@ Resources:
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/AmazonSNSFullAccess'
   VpcEndpoint:
-    Type: AWS::EC2::VPCEndpoint
+    Type: AWS::EC2::InstanceConnectEndpoint
     Properties:
-      PrivateDnsEnabled: true
+      PreserveClientIp: true
       SecurityGroupIds: 
         - !Ref SecurityGroup
-      ServiceName: com.amazonaws.us-east-1.ec2
-      SubnetIds: 
-        - !Ref Subnet
-      VpcEndpointType: Interface
-      VpcId: !Ref VPC
+      SubnetId: !Ref Subnet
+      Tags: 
+        - Key: Name
+          Value: VpcEndpoint-to-connect-privatly
   LambdaExecutionRole:
     Type: 'AWS::IAM::Role'
     Properties:
