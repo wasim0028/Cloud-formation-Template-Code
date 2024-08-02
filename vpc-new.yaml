@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CloudFormation Template for SNS VPC Endpoints Tutorial
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  SSHLocation:
+    Description: The IP address range that can be used to SSH to the EC2 instance
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: ami-04a81a99f5ec58529
+    us-east-2:
+      AMI: ami-0862be96e41dcbf74
+
+Resources:
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: Flask-Vpc-Point
+  PublicSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.0.0/24'
+      AvailabilityZone: 'us-east-2a'
+      Tags:
+        - Key: Name
+          Value: PublicSubnet1
+  PublicSubnet2: 
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.1.0/24'
+      AvailabilityZone: 'us-east-2b'
+      Tags:
+        - Key: Name
+          Value: PublicSubnet2
+  PrivateSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.2.0/24'
+      AvailabilityZone: 'us-east-2c'
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet1
+  PrivateSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.3.0/24'
+      AvailabilityZone: 'us-east-2a'
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet2
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Flask-Internet-Gateway
+  VPCGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicRouteTable1:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable1
+  PublicRouteTable2:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable2
+  PrivateRouteTable1:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable1
+  PrivateRouteTable2:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable2
+  PublicSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable1
+  PublicSubnet2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable2
+  PrivateSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
+  PrivateSubnet2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
+  PublicInternetGatewayRoute1:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1
+      GatewayId: !Ref InternetGateway
+      DestinationCidrBlock: 0.0.0.0/0
+  PublicInternetGatewayRoute2:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PublicRouteTable2
+      GatewayId: !Ref InternetGateway
+      DestinationCidrBlock: 0.0.0.0/0
+  ## NAT GATEWAY
+  NATGateway:
+   Type: AWS::EC2::NatGateway
+   Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+      - Key: Name
+        Value: production
+  NATGatewayEIP:
+   Type: AWS::EC2::EIP
+   Properties:
+      Domain: vpc
+  RouteNATGateway1:
+   Type: AWS::EC2::Route
+   Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NATGateway
+  RouteNATGateway2:
+   Type: AWS::EC2::Route
+   Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NATGateway
+  
+  
