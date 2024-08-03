@@ -140,7 +140,7 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
   ## NAT GATEWAY
   NATGateway:
-   Type: AWS::EC2::NatGateway
+   Type: 'AWS::EC2::NatGateway'
    Properties:
       AllocationId: !GetAtt NATGatewayEIP.AllocationId
       SubnetId: !Ref PublicSubnet1
@@ -148,20 +148,177 @@ Resources:
       - Key: Name
         Value: production
   NATGatewayEIP:
-   Type: AWS::EC2::EIP
+   Type: 'AWS::EC2::EIP'
    Properties:
       Domain: vpc
   RouteNATGateway1:
-   Type: AWS::EC2::Route
+   Type: 'AWS::EC2::Route'
    Properties:
       RouteTableId: !Ref PrivateRouteTable1
       DestinationCidrBlock: '0.0.0.0/0'
       NatGatewayId: !Ref NATGateway
   RouteNATGateway2:
-   Type: AWS::EC2::Route
+   Type: 'AWS::EC2::Route'
    Properties:
       RouteTableId: !Ref PrivateRouteTable2
       DestinationCidrBlock: '0.0.0.0/0'
       NatGatewayId: !Ref NATGateway
+  SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: Flask-Point-SecurityGroup
+      GroupDescription: Security Group for Flask-Point
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Ref SSHLocation
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref SSHLocation
+  Ec2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !FindInMap
+        - RegionMap
+        - !Ref 'AWS::Region'
+        - AMI
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref SecurityGroup
+          SubnetId: !Ref PrivateSubnet1
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: Flask-Point-Ec2
+  EC2InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+      InstanceProfileName: EC2InstanceProfile
+  EC2InstanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: FP-EC2InstanceRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonRDSFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
+  # RDS Subnet Group
+  RDSDBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: "description"
+      DBSubnetGroupName: "RDS_DB_PrivSubnet"
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
   
+    # KMS RDS encryption key
+  rdsKey:
+      Type: AWS::KMS::Key
+      Properties:
+        KeyPolicy:
+          Version: 2012-10-17
+          Id: key-rds
+          Statement:
+            - Sid: Enable IAM User Permissions
+              Effect: Allow
+              Principal:
+                AWS: !Join
+                  - ''
+                  - - 'arn:aws:iam::'
+                    - !Ref 'AWS::AccountId'
+                    - ':root'
+              Action: 'kms:*'
+              Resource: '*'
+  rdsAlias:
+      Type: AWS::KMS::Alias
+      Properties:
+        AliasName: alias/rds
+        TargetKeyId:
+          Ref: rdsKey
+  # RDS MySQL database configuration
+  MySQLDatabase:
+      Type: 'AWS::RDS::DBInstance'
+      Properties:
+        Engine: MySQL
+        DBName: "RDS"
+        StorageEncrypted: true
+        KmsKeyId: !Ref rdsKey
+        MasterUsername: 'dbuser'
+        MasterUserPassword: 'wasimakram0028'
+        DBInstanceClass: db.t3.micro
+        AllocatedStorage: '5'
+# To add a specific storage type add "StorageType: gp2, io1, or standard" for io1 you must also declare "Iops: with an integer equal or greater then 1000"
+# gp2 is General Purpose (SSD), io1 is provisioned IOPS, and standard is magnetic
+        DBSubnetGroupName: !Ref RDSDBSubnetGroup
+        VPCSecurityGroups:
+          - Ref: SecurityGroup
+   # Target Group
+  EC2TargetGroup:
+      Type: AWS::ElasticLoadBalancingV2::TargetGroup
+      Properties:
+        HealthCheckIntervalSeconds: 30
+        HealthCheckProtocol: HTTP
+        HealthCheckTimeoutSeconds: 15
+        HealthyThresholdCount: 5
+        Matcher:
+          HttpCode: '200'
+        Name: EC2TargetGroup
+        Port: 80
+        Protocol: HTTP
+        TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '20'
+        Targets:
+        - Id:
+            Ref: Ec2Instance
+          Port: 80
+        UnhealthyThresholdCount: 3
+        VpcId: !Ref 'VPC'
+        Tags:
+        - Key: Name
+          Value: EC2TargetGroup
+        - Key: Port
+          Value: 80
+
+    #ELB (ALB)
+  ALBListener:
+      Type: AWS::ElasticLoadBalancingV2::Listener
+      Properties:
+        DefaultActions:
+          - Type: forward
+            TargetGroupArn:
+              Ref: EC2TargetGroup
+        LoadBalancerArn:
+            Ref: ApplicationLoadBalancer
+        Port: 80
+        Protocol: HTTP
+  ApplicationLoadBalancer:
+      Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+      Properties:
+        Scheme: internet-facing # or internal
+        Subnets:
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
+        SecurityGroups: 
+        - Ref: SecurityGroup
   
