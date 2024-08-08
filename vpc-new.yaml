@@ -13,6 +13,14 @@ Parameters:
     Default: 0.0.0.0/0
     AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
     ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  EnvironmentName:
+    Description: Environment name for the application dev/staging/production
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - production
+      - employee_image
 
 Mappings:
   RegionMap:
@@ -138,7 +146,7 @@ Resources:
       RouteTableId: !Ref PublicRouteTable2
       GatewayId: !Ref InternetGateway
       DestinationCidrBlock: 0.0.0.0/0
-  ## NAT GATEWAY
+  # NAT GATEWAY
   NATGateway:
    Type: 'AWS::EC2::NatGateway'
    Properties:
@@ -198,9 +206,41 @@ Resources:
             - !Ref SecurityGroup
           SubnetId: !Ref PrivateSubnet1
       IamInstanceProfile: !Ref EC2InstanceProfile
+      Tenancy: default
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          # Pre-Bootstrap Configuration
+          sudo apt-get update -y
+          sudo apt-get install python3 -y
+          sudo apt-get install python3-boto3 -y
+          sudo apt-get install python3-flask -y
+          sudo apt-get install mysql-server -y
+          sudo apt-get install python3-pymysql -y
+          git clone https://github.com/Training-demo/aws-code-main 
       Tags:
         - Key: Name
           Value: Flask-Point-Ec2
+  RDSInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !FindInMap
+        - RegionMap
+        - !Ref 'AWS::Region'
+        - AMI
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref SecurityGroup
+          SubnetId: !Ref PrivateSubnet2
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: Flask-Point-RDS
+      
   EC2InstanceProfile:
     Type: 'AWS::IAM::InstanceProfile'
     Properties:
@@ -221,6 +261,7 @@ Resources:
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/AmazonRDSFullAccess'
         - 'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
   # RDS Subnet Group
   RDSDBSubnetGroup:
     Type: "AWS::RDS::DBSubnetGroup"
@@ -321,4 +362,17 @@ Resources:
         - Ref: PublicSubnet2
         SecurityGroups: 
         - Ref: SecurityGroup
+  DynamoDBTable:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      TableName: !Sub "${EnvironmentName}_table"
+      AttributeDefinitions:
+        - AttributeName: "empid"
+          AttributeType: "N"
+      KeySchema:
+        - AttributeName: "id"
+          KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
   
